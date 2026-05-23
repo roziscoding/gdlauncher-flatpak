@@ -30,15 +30,9 @@ modules:
       - install -Dm644 gg.gdl.GDLauncher.desktop /app/share/applications/gg.gdl.GDLauncher.desktop
       - install -Dm644 gg.gdl.GDLauncher.metainfo.xml /app/share/metainfo/gg.gdl.GDLauncher.metainfo.xml
       - install -Dm644 squashfs-root/usr/share/icons/hicolor/2048x2048/apps/@gddesktop.png /app/share/icons/hicolor/2048x2048/apps/gg.gdl.GDLauncher.png
-      # Generate smaller icon sizes
       - |
         for size in 512 256 128 64 48 32 16; do
-          install -d /app/share/icons/hicolor/${size}x${size}/apps
-          if command -v magick > /dev/null 2>&1; then
-            magick /app/share/icons/hicolor/2048x2048/apps/gg.gdl.GDLauncher.png -resize ${size}x${size} /app/share/icons/hicolor/${size}x${size}/apps/gg.gdl.GDLauncher.png
-          elif command -v convert > /dev/null 2>&1; then
-            convert /app/share/icons/hicolor/2048x2048/apps/gg.gdl.GDLauncher.png -resize ${size}x${size} /app/share/icons/hicolor/${size}x${size}/apps/gg.gdl.GDLauncher.png
-          fi
+          install -Dm644 icons/${size}.png /app/share/icons/hicolor/${size}x${size}/apps/gg.gdl.GDLauncher.png
         done
     sources:
       - type: file
@@ -56,3 +50,6 @@ modules:
         path: gg.gdl.GDLauncher.desktop
       - type: file
         path: gg.gdl.GDLauncher.metainfo.xml
+      - type: dir
+        path: icons
+        dest: icons
