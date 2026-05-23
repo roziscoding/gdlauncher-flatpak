@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>gg.gdl.GDLauncher</id>
+  <name>GDLauncher</name>
+  <summary>A custom Minecraft launcher with built-in mod management</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary=https://gdlauncher.com</project_license>
+
+  <description>
+    <p>
+      GDLauncher is a custom Minecraft launcher with built-in mod management,
+      modpack support, and a modern interface. It allows you to easily install
+      and manage Minecraft instances, mods from CurseForge and Modrinth, and
+      modpacks with just a few clicks.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">gg.gdl.GDLauncher.desktop</launchable>
+
+  <url type="homepage">https://gdlauncher.com</url>
+  <url type="bugtracker">https://github.com/gorilla-devs/GDLauncher-Carbon/issues</url>
+
+  <developer id="gg.gdl">
+    <name>Gorilla Devs</name>
+  </developer>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="2.0.30" date="2025-05-01">
+      <description>
+        <p>GDLauncher v2.0.30</p>
+      </description>
+    </release>
+  </releases>
+
+  <categories>
+    <category>Game</category>
+  </categories>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+</component>

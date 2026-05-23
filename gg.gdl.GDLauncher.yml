@@ -1,0 +1,58 @@
+app-id: gg.gdl.GDLauncher
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: gdlauncher
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=home
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --env=XCURSOR_PATH=/run/host/user-share/icons:/run/host/share/icons
+
+modules:
+  - name: gdlauncher
+    buildsystem: simple
+    build-commands:
+      - chmod +x GDLauncher.AppImage
+      - ./GDLauncher.AppImage --appimage-extract
+      - install -d /app/bin
+      - install -d /app/lib/gdlauncher
+      - cp -r squashfs-root/* /app/lib/gdlauncher/
+      - chmod -R a-s /app/lib/gdlauncher/
+      - install -Dm755 gdlauncher.sh /app/bin/gdlauncher
+      - install -Dm644 gg.gdl.GDLauncher.desktop /app/share/applications/gg.gdl.GDLauncher.desktop
+      - install -Dm644 gg.gdl.GDLauncher.metainfo.xml /app/share/metainfo/gg.gdl.GDLauncher.metainfo.xml
+      - install -Dm644 squashfs-root/usr/share/icons/hicolor/2048x2048/apps/@gddesktop.png /app/share/icons/hicolor/2048x2048/apps/gg.gdl.GDLauncher.png
+      # Generate smaller icon sizes
+      - |
+        for size in 512 256 128 64 48 32 16; do
+          install -d /app/share/icons/hicolor/${size}x${size}/apps
+          if command -v magick > /dev/null 2>&1; then
+            magick /app/share/icons/hicolor/2048x2048/apps/gg.gdl.GDLauncher.png -resize ${size}x${size} /app/share/icons/hicolor/${size}x${size}/apps/gg.gdl.GDLauncher.png
+          elif command -v convert > /dev/null 2>&1; then
+            convert /app/share/icons/hicolor/2048x2048/apps/gg.gdl.GDLauncher.png -resize ${size}x${size} /app/share/icons/hicolor/${size}x${size}/apps/gg.gdl.GDLauncher.png
+          fi
+        done
+    sources:
+      - type: file
+        url: https://cdn-raw.gdl.gg/launcher/GDLauncher__2.0.30__linux__x64.AppImage
+        sha256: 060be58a87064cdb48eecd5a379e759fe30bcaa1936e31acd4f8d4908b54b64b
+        dest-filename: GDLauncher.AppImage
+        x-checker-data:
+          type: json
+          url: https://cdn-raw.gdl.gg/launcher/latest-linux.yml
+          version-query: .version
+          url-query: .files[0].url
+      - type: file
+        path: gdlauncher.sh
+      - type: file
+        path: gg.gdl.GDLauncher.desktop
+      - type: file
+        path: gg.gdl.GDLauncher.metainfo.xml
