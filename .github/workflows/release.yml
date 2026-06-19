@@ -8,6 +8,9 @@ on:
         description: Tag to build and publish a release for
         required: true
         type: string
+  # a version tag pushed directly (e.g. locally via `mise run update`)
+  push:
+    tags: ['*.*.*']
   # build-only validation on PRs (no release)
   pull_request:
 
@@ -38,8 +41,8 @@ jobs:
 
   release:
     needs: build
-    # only when called with a tag (workflow_call); skipped on pull_request
-    if: inputs.tag != ''
+    # on a tag push, or when called with a tag input; skipped on pull_request
+    if: github.event_name == 'push' || inputs.tag != ''
     runs-on: ubuntu-latest
 
     steps:
@@ -49,7 +52,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          name: GDLauncher ${{ inputs.tag }}
-          tag_name: ${{ inputs.tag }}
+          name: GDLauncher ${{ inputs.tag || github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: GDLauncher.flatpak
           fail_on_unmatched_files: true
