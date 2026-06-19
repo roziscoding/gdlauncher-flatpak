@@ -33,11 +33,25 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      - name: Build into an OSTree repo
+      - name: Import GPG signing key
+        shell: bash
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+        run: |
+          gnupghome="$(mktemp -d)"
+          chmod 700 "$gnupghome"
+          printf '%s' "$FLATPAK_GPG_PRIVATE_KEY" | gpg --homedir "$gnupghome" --batch --import
+          keyid="$(gpg --homedir "$gnupghome" --list-secret-keys --with-colons | awk -F: '/^sec:/{print $5; exit}')"
+          echo "GNUPGHOME=$gnupghome" >> "$GITHUB_ENV"
+          echo "GPG_KEY_ID=$keyid" >> "$GITHUB_ENV"
+
+      - name: Build into a signed OSTree repo
         run: |
           flatpak-builder --repo=repo --force-clean --disable-rofiles-fuse \
+            --gpg-sign="${GPG_KEY_ID}" --gpg-homedir="${GNUPGHOME}" \
             build-dir gg.gdl.GDLauncher.yml
-          flatpak build-update-repo --prune repo
+          flatpak build-update-repo --prune \
+            --gpg-sign="${GPG_KEY_ID}" --gpg-homedir="${GNUPGHOME}" repo
 
       - name: Add .flatpakrepo + landing page
         shell: bash
@@ -54,6 +68,7 @@ jobs:
           base="${base/#http:/https:}"            # force https
           case "$base" in */) ;; *) base="$base/";; esac   # ensure trailing slash
           echo "Repo URL: $base"
+          gpgkey="$(gpg --export "${GPG_KEY_ID}" | base64 -w0)"
           cat > repo/gdlauncher.flatpakrepo <<EOF
           [Flatpak Repo]
           Title=GDLauncher (unofficial)
@@ -61,6 +76,7 @@ jobs:
           Homepage=https://gdlauncher.com
           Comment=Unofficial Flatpak packaging of GDLauncher
           Description=Unofficial Flatpak repository that repackages the upstream GDLauncher AppImage.
+          GPGKey=${gpgkey}
           EOF
           cat > repo/index.html <<EOF
           <!doctype html><meta charset="utf-8">
