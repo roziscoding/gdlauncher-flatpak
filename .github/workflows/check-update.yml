@@ -56,5 +56,6 @@ jobs:
       contents: write
       pages: write
       id-token: write
+    secrets: inherit
     with:
       tag: ${{ needs.check.outputs.version }}

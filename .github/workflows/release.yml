@@ -11,8 +11,10 @@ on:
   # a version tag pushed directly (e.g. locally via `mise run update`)
   push:
     tags: ['*.*.*']
-  # build-only validation on PRs (no release)
+  # build-only validation on PRs (no release, no deploy)
   pull_request:
+  # manual rebuild + redeploy of the Pages repo (no GitHub release)
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -20,6 +22,8 @@ permissions:
   id-token: write
 
 jobs:
+  # one build produces both the signed OSTree repo (for Pages) and the
+  # single-file bundle (for the GitHub release), derived from that repo.
   build:
     runs-on: ubuntu-latest
     container:
@@ -31,19 +35,85 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+      # cache the downloaded AppImage + flatpak-builder state (keyed on the
+      # manifest; a stale AppImage is re-fetched anyway since its sha is pinned)
+      - uses: actions/cache@v4
         with:
-          bundle: GDLauncher.flatpak
-          manifest-path: gg.gdl.GDLauncher.yml
+          path: .flatpak-builder
+          key: flatpak-builder-${{ hashFiles('gg.gdl.GDLauncher.yml') }}
+          restore-keys: |
+            flatpak-builder-
+
+      - name: Import GPG signing key
+        shell: bash
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+        run: |
+          gnupghome="$(mktemp -d)"
+          chmod 700 "$gnupghome"
+          printf '%s' "$FLATPAK_GPG_PRIVATE_KEY" | gpg --homedir "$gnupghome" --batch --import
+          keyid="$(gpg --homedir "$gnupghome" --list-secret-keys --with-colons | awk -F: '/^sec:/{print $5; exit}')"
+          echo "GNUPGHOME=$gnupghome" >> "$GITHUB_ENV"
+          echo "GPG_KEY_ID=$keyid" >> "$GITHUB_ENV"
+
+      - name: Build signed OSTree repo + bundle
+        run: |
+          flatpak-builder --repo=repo --force-clean --disable-rofiles-fuse \
+            --gpg-sign="${GPG_KEY_ID}" --gpg-homedir="${GNUPGHOME}" \
+            build-dir gg.gdl.GDLauncher.yml
+          flatpak build-update-repo --prune \
+            --gpg-sign="${GPG_KEY_ID}" --gpg-homedir="${GNUPGHOME}" repo
+          flatpak build-bundle \
+            --gpg-sign="${GPG_KEY_ID}" --gpg-homedir="${GNUPGHOME}" \
+            repo GDLauncher.flatpak gg.gdl.GDLauncher
+
+      - name: Add .flatpakrepo + landing page
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # use the real Pages URL (handles custom domains); fall back to github.io
+          base="$(curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pages" \
+            | grep -o '"html_url"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 \
+            | sed -E 's/.*"([^"]*)"$/\1/' || true)"
+          [ -n "$base" ] || base="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY##*/}"
+          base="${base/#http:/https:}"            # force https
+          case "$base" in */) ;; *) base="$base/";; esac   # ensure trailing slash
+          echo "Repo URL: $base"
+          gpgkey="$(gpg --export "${GPG_KEY_ID}" | base64 -w0)"
+          cat > repo/gdlauncher.flatpakrepo <<EOF
+          [Flatpak Repo]
+          Title=GDLauncher (unofficial)
+          Url=${base}
+          Homepage=https://gdlauncher.com
+          Comment=Unofficial Flatpak packaging of GDLauncher
+          Description=Unofficial Flatpak repository that repackages the upstream GDLauncher AppImage.
+          GPGKey=${gpgkey}
+          EOF
+          cat > repo/index.html <<EOF
+          <!doctype html><meta charset="utf-8">
+          <title>GDLauncher (unofficial) Flatpak repo</title>
+          <h1>GDLauncher — unofficial Flatpak repo</h1>
+          <p>Add the remote and install:</p>
+          <pre>flatpak remote-add --if-not-exists gdlauncher ${base}gdlauncher.flatpakrepo
+          flatpak install gdlauncher gg.gdl.GDLauncher</pre>
+          <p>It then updates via <code>flatpak update</code> or your software center.</p>
+          EOF
 
       - uses: actions/upload-artifact@v4
         with:
           name: GDLauncher-flatpak
           path: GDLauncher.flatpak
 
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: repo
+
   release:
     needs: build
-    # on a tag push, or when called with a tag input; skipped on pull_request
+    # on a tag push, or when called with a tag input; skipped on PR / manual dispatch
     if: github.event_name == 'push' || inputs.tag != ''
     runs-on: ubuntu-latest
 
@@ -59,13 +129,18 @@ jobs:
           files: GDLauncher.flatpak
           fail_on_unmatched_files: true
 
-  # refresh the OSTree repo served via GitHub Pages (skipped on pull_request)
-  pages:
-    if: github.event_name == 'push' || inputs.tag != ''
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    uses: ./.github/workflows/pages.yml
-    with:
-      ref: ${{ inputs.tag || github.ref_name }}
+  deploy-pages:
+    needs: build
+    # deploy on tag / workflow_call / manual dispatch, but not on PRs
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
