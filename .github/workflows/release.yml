@@ -1,8 +1,15 @@
 name: Build & Release
 
 on:
-  push:
-    branches: [master]
+  # called by check-update.yml once a new GDLauncher version has been tagged
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to build and publish a release for
+        required: true
+        type: string
+  # build-only validation on PRs (no release)
+  pull_request:
 
 permissions:
   contents: write
@@ -16,6 +23,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
@@ -29,26 +38,18 @@ jobs:
 
   release:
     needs: build
+    # only when called with a tag (workflow_call); skipped on pull_request
+    if: inputs.tag != ''
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install semantic-release
-        run: npm install -g semantic-release @semantic-release/git @semantic-release/github @semantic-release/changelog @semantic-release/commit-analyzer @semantic-release/release-notes-generator
-
       - uses: actions/download-artifact@v4
         with:
           name: GDLauncher-flatpak
 
-      - name: Run semantic-release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: GDLauncher ${{ inputs.tag }}
+          tag_name: ${{ inputs.tag }}
+          files: GDLauncher.flatpak
+          fail_on_unmatched_files: true

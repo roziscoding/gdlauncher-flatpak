@@ -1,0 +1,58 @@
+name: Check for GDLauncher update
+
+on:
+  schedule:
+    # ~fortnightly: 06:00 UTC on the 1st and 15th. GDLauncher ships infrequently
+    # via its own CDN (no public release schedule), so this is plenty.
+    - cron: '0 6 1,15 * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      updated: ${{ steps.update.outputs.updated }}
+      version: ${{ steps.update.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Check for and apply update
+        id: update
+        run: |
+          before="$(git rev-parse HEAD)"
+          # the mise task patches the manifest + metainfo, commits and tags;
+          # run directly (it falls back to `git rev-parse --show-toplevel` for the root)
+          bash .mise/tasks/update
+          after="$(git rev-parse HEAD)"
+
+          if [ "$before" = "$after" ]; then
+            echo "No new GDLauncher version."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          version="$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' gg.gdl.GDLauncher.yml | head -1)"
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "refs/tags/${version}"
+
+  publish:
+    needs: check
+    if: needs.check.outputs.updated == 'true'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      tag: ${{ needs.check.outputs.version }}
