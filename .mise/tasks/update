@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+#MISE description="Bump the packaged GDLauncher to the latest upstream release (updates manifest url+sha256 and adds a metainfo release entry)"
+#USAGE flag "--force" help="Re-apply even if the manifest is already on the latest version"
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+MANIFEST="$ROOT/gg.gdl.GDLauncher.yml"
+METAINFO="$ROOT/gg.gdl.GDLauncher.metainfo.xml"
+
+FORCE=0
+[[ "${usage_force:-}" == "true" || "${1:-}" == "--force" ]] && FORCE=1
+
+# --- discover latest upstream release -----------------------------------
+# the latest-linux.yml URL (and its base) come straight from the manifest's
+# x-checker-data block, so this stays in sync if upstream ever moves the CDN.
+LATEST_YML="$(grep -oE 'https://[^ ]*latest-linux\.yml' "$MANIFEST" | head -1)"
+BASE_URL="${LATEST_YML%/*}"
+[[ -n "$LATEST_YML" ]] || { echo "✗ Could not find the latest-linux.yml URL in $MANIFEST" >&2; exit 1; }
+
+echo "→ Fetching $LATEST_YML"
+META="$(curl -fsSL "$LATEST_YML")"
+
+# top-level fields only, so plain grep is enough (no yq needed)
+NEW_VERSION="$(printf '%s\n' "$META" | grep -E '^version:'     | head -1 | sed -E 's/^version:[[:space:]]*//'     | tr -d '"\r')"
+NEW_FILE="$(printf    '%s\n' "$META" | grep -E '^path:'        | head -1 | sed -E 's/^path:[[:space:]]*//'        | tr -d '"\r')"
+REL_DATE="$(printf    '%s\n' "$META" | grep -E '^releaseDate:' | head -1 | sed -E 's/^releaseDate:[[:space:]]*//' | tr -d '"\r' | cut -c1-10)"
+NEW_URL="$BASE_URL/$NEW_FILE"
+
+[[ -n "$NEW_VERSION" && -n "$NEW_FILE" ]] || { echo "✗ Could not parse version/path from latest-linux.yml" >&2; exit 1; }
+
+# --- currently packaged version -----------------------------------------
+CUR_URL="$(grep -oE 'https://[^ ]*\.AppImage' "$MANIFEST" | head -1)"
+CUR_VERSION="$(printf '%s' "$CUR_URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+
+echo "  current: ${CUR_VERSION:-?}"
+echo "  latest:  $NEW_VERSION"
+
+if [[ "$CUR_VERSION" == "$NEW_VERSION" && "$FORCE" -ne 1 ]]; then
+  echo "✓ Already up to date (pass --force to re-apply)."
+  exit 0
+fi
+
+# --- download + checksum the new AppImage -------------------------------
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+echo "→ Downloading $NEW_URL"
+curl -fL# "$NEW_URL" -o "$TMP/app.AppImage"
+NEW_SHA="$(sha256sum "$TMP/app.AppImage" | awk '{print $1}')"
+echo "  sha256: $NEW_SHA"
+
+# --- patch the manifest -------------------------------------------------
+# only the AppImage source line ends in .AppImage; the checker URL ends in .yml,
+# so this never touches x-checker-data. there is a single sha256: line.
+sed -i -E "s#( *url: ).*\.AppImage#\1$NEW_URL#" "$MANIFEST"
+sed -i -E "s#( *sha256: ).*#\1$NEW_SHA#"        "$MANIFEST"
+echo "✓ Patched $(basename "$MANIFEST") (url + sha256)"
+
+# --- add a metainfo <release> entry (idempotent) ------------------------
+if grep -q "version=\"$NEW_VERSION\"" "$METAINFO"; then
+  echo "• $(basename "$METAINFO") already lists $NEW_VERSION, skipping"
+else
+  ENTRY="$(cat <<EOF
+    <release version="$NEW_VERSION" date="$REL_DATE">
+      <description>
+        <p>GDLauncher v$NEW_VERSION</p>
+      </description>
+    </release>
+EOF
+)"
+  # insert right after the <releases> opening tag so newest stays on top
+  awk -v entry="$ENTRY" '
+    { print }
+    /<releases>/ && !done { print entry; done = 1 }
+  ' "$METAINFO" > "$METAINFO.tmp" && mv "$METAINFO.tmp" "$METAINFO"
+  echo "✓ Added $(basename "$METAINFO") release entry for $NEW_VERSION ($REL_DATE)"
+fi
+
+# --- commit + tag (local only; never pushes) ----------------------------
+cd "$ROOT"
+TAG="$NEW_VERSION"
+
+if git diff --quiet -- "$MANIFEST" "$METAINFO"; then
+  echo "• No manifest/metainfo changes to commit."
+else
+  git add "$MANIFEST" "$METAINFO"
+  # signed per the repo's git config (1Password SSH); conventional commit drives semantic-release
+  git commit -m "feat: update GDLauncher to $NEW_VERSION"
+  echo "✓ Committed: feat: update GDLauncher to $NEW_VERSION"
+fi
+
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  echo "• Tag $TAG already exists, leaving it untouched."
+else
+  git tag "$TAG"
+  echo "✓ Tagged $TAG"
+fi
+
+cat <<EOF
+
+Done — committed and tagged locally, nothing pushed. To validate and publish:
+  appstreamcli validate $(basename "$METAINFO")
+  flatpak-builder --user --install --force-clean build-dir $(basename "$MANIFEST")
+  flatpak run gg.gdl.GDLauncher
+  git push && git push origin $TAG
+EOF
