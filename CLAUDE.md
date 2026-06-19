@@ -36,7 +36,7 @@ The build (`gg.gdl.GDLauncher.yml`, `buildsystem: simple`) does the following:
 5. Installs the `.desktop`, `.metainfo.xml`, and pre-generated PNG icons (16–512px) from `icons/`.
 
 Key cross-file relationships:
-- `gdlauncher.sh` execs `/app/lib/gdlauncher/@gddesktop --no-sandbox` (the `@gddesktop` binary name comes from the extracted AppImage) and sets `TMPDIR` into the per-app runtime dir. Electron under Flatpak needs `--no-sandbox`.
+- `gdlauncher.sh` execs `/app/lib/gdlauncher/@gddesktop --no-sandbox --ozone-platform-hint=auto` (the `@gddesktop` binary name comes from the extracted AppImage) and sets `TMPDIR` into the per-app runtime dir. Electron under Flatpak needs `--no-sandbox`. The `--ozone-platform-hint=auto` is required alongside `--socket=fallback-x11`: launchers (GNOME, etc.) start the app without `DISPLAY`, so Electron must render natively on Wayland or the window never appears.
 - The app-id `gg.gdl.GDLauncher` is the contract tying together the manifest, `.desktop` `Icon=`, metainfo `<id>`, and installed icon/desktop filenames — they must stay in sync.
 - `.desktop` registers URL scheme handlers (`gdlauncher`, `curseforge`, `modrinth`) for deep links; `StartupWMClass=GDLauncher` must match the app's window class.
 - The metainfo `<release>` list and the manifest's pinned AppImage version should be updated together when bumping GDLauncher.
