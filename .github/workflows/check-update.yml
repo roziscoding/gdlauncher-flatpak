@@ -54,5 +54,7 @@ jobs:
     uses: ./.github/workflows/release.yml
     permissions:
       contents: write
+      pages: write
+      id-token: write
     with:
       tag: ${{ needs.check.outputs.version }}

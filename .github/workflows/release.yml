@@ -16,6 +16,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build:
@@ -56,3 +58,14 @@ jobs:
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: GDLauncher.flatpak
           fail_on_unmatched_files: true
+
+  # refresh the OSTree repo served via GitHub Pages (skipped on pull_request)
+  pages:
+    if: github.event_name == 'push' || inputs.tag != ''
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
